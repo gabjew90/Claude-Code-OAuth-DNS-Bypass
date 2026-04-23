@@ -1,130 +1,179 @@
 # claude-oauth-worker
 
-Three Cloudflare Workers that give you **full Claude access from DNS-filtered environments** where direct connections to `api.anthropic.com`, `claude.ai`, `pivot.claude.ai`, etc. are blocked.
+**Use your Claude Max / Pro / Team / Enterprise account from a network that blocks Anthropic.**
 
-Typical use case: your corporate / school / restricted network filters Anthropic domains, but you have a paid Claude Max subscription and want to actually use it from your work laptop. Workers live on Cloudflare (usually not blocked), proxy your traffic, and handle OAuth token refresh server-side.
+If your corporate / school / restricted network DNS-filters `api.anthropic.com`, `claude.ai`, `pivot.claude.ai`, or similar — but you have a legitimate Claude subscription — this repo deploys small Cloudflare Workers that proxy the traffic through a domain your network doesn't block (`*.workers.dev`). You run Anthropic's own services through your own Cloudflare account.
 
-## What you get
+**Two capabilities. Pick either, or both:**
 
-1. **VSCode Claude Code** stays logged in indefinitely on the blocked network — no daily credential re-paste ritual.
-2. **Anthropic's official Claude-for-Office add-ins** (Excel, PowerPoint, Word) install and authenticate cleanly, with all traffic routed through your own Cloudflare proxy.
-3. One-command install/uninstall for Office sideloads, plus a diagnostic script for when Anthropic's bundle changes and a rewrite breaks.
+1. **VSCode Claude Code stays logged in** — no more daily credential re-paste ritual.
+2. **Claude for Excel / PowerPoint add-ins install and work** — Anthropic's official add-ins on your blocked machine.
 
-You keep your Claude Max quota. No API key, no extra billing — everything runs on the real OAuth tokens your normal Claude account issues.
+No API key, no extra billing. Your traffic still counts against your existing Claude subscription quota — same as if you were using Claude normally. Just routed differently.
 
-## Role separation across the three Workers — important
+---
 
-Before you flip any flag, understand how the three Workers divide responsibilities:
+## Does this apply to me?
 
-| Worker | Used by | `ENABLE_AUTH_INJECTION` | Why |
-|---|---|---|---|
-| **main** (`<name>.workers.dev`) | The Office add-ins route their `api.anthropic.com` calls here (auto, via pivot-proxy rewriting their bundle) | **`false` (pass-through)** | The add-ins already have their own valid OAuth tokens (from the phone-auth flow). Injecting Claude-Code-scoped tokens in their place would break the add-ins' profile / entitlement calls because tokens are tied to different client_ids. |
-| **test** (`<name>-test.workers.dev`) | Point your VSCode `ANTHROPIC_BASE_URL` here | **`true` (inject)** | VSCode Claude Code benefits from server-side OAuth refresh because its local refresh endpoint is DNS-blocked. |
-| **pivot** (`<name>-pivot.workers.dev`) | The Office add-ins load from here (sideloaded manifest) | n/a (not an API proxy) | Proxies `pivot.claude.ai` with surgical bundle rewrites. |
+You want this if **all** of these are true:
 
-Keep the Workers in their lanes. **Do not set the main Worker's flag to `true` if you're using the Office add-ins** — it'll break them.
+- [ ] You have a paid Claude subscription (Pro / Max / Team / Enterprise — not an API-only account).
+- [ ] You use Claude on a laptop/machine that blocks `*.anthropic.com` / `*.claude.ai` / `*.claude.com` at the DNS layer (typical for Cisco Umbrella, corporate zero-trust, restrictive school networks, etc.).
+- [ ] You have another device — phone, personal laptop on home wifi — where Claude domains *do* resolve normally. (You'll use it once to get a refresh token, and once per device for Office-add-in sign-in.)
+- [ ] You're comfortable running PowerShell and `wrangler` commands on the blocked machine.
 
-If you only care about the VSCode auth fix (no Office add-ins), the whole model collapses to "just point VSCode at the test Worker." You can skip deploying the pivot Worker entirely.
+If you want **only the Excel/PowerPoint add-ins** and don't care about VSCode Claude Code, see the standalone repo [claude-office-addin-proxy](https://github.com/<you>/claude-office-addin-proxy) — simpler to set up (only two Workers, no OAuth bootstrap).
 
-## Architecture at a glance
+---
+
+## Architecture — how it fits together
+
+The setup deploys **three Cloudflare Workers** under your account. Each has one job and stays in its lane:
 
 ```
-Your blocked-network laptop                Cloudflare (unblocked)
-┌──────────────────────────┐  ┌──────────────────────────────────────────────────┐
-│  VSCode Claude Code      │─▶│ <main>.workers.dev                               │
-│  (ANTHROPIC_BASE_URL)    │  │   - proxies api.anthropic.com                    │
-│                          │  │   - refreshes OAuth tokens using refresh token   │
-│                          │  │     stored as Worker secret + KV rotation cache  │
-│                          │  └──────────────────────────────────────────────────┘
-│                          │  ┌──────────────────────────────────────────────────┐
-│  Office add-ins          │─▶│ <pivot>.workers.dev                              │
-│  (Excel / PowerPoint /   │  │   - proxies pivot.claude.ai (official add-in)    │
-│    Word task panes,      │  │   - surgical JS-bundle rewrites so redirect_uri  │
-│    sideloaded)           │  │     is a registered URI, token exchange hits     │
-│                          │  │     /v1/oauth/token on this proxy, inference     │
-│                          │  │     calls hit the main Worker above              │
-└──────────────────────────┘  └──────────────────────────────────────────────────┘
-                                            │
-                                            ▼
-                                  api.anthropic.com / claude.ai / pivot.claude.ai
-                                  (billed against your Claude Max subscription)
+Your blocked-network laptop                                  Cloudflare (not blocked)
+┌──────────────────────────────────────┐
+│                                      │
+│  VSCode Claude Code                  │   auto-refreshes your OAuth token
+│  env.ANTHROPIC_BASE_URL  ──────────▶ │   <name>-test.workers.dev
+│                                      │   (ENABLE_AUTH_INJECTION = "true")
+│                                      │   Worker strips stale Bearer token,
+│                                      │   injects a fresh one minted via
+│                                      │   server-side OAuth refresh.
+│                                      │
+│                                      │
+│  Office add-ins (Excel / PowerPoint) │   pass-through for api.anthropic.com
+│  (sideloaded manifest)               │   <name>.workers.dev
+│       │                              │   (ENABLE_AUTH_INJECTION = "false")
+│       │ bundle rewrites route its    │   Forwards requests unchanged. The
+│       │ api.anthropic.com calls here │   add-in's OWN OAuth token stays
+│       ▼                              │   intact — critical, because it's
+│                                      │   scoped to a different client_id
+│                                      │   than VSCode's token.
+│                                      │
+│       │                              │   proxies the add-in's UI (HTML/JS)
+│       │ manifest SourceLocation      │   <name>-pivot.workers.dev
+│       │ points here                  │   Does surgical JS-bundle rewrites
+│       ▼                              │   so OAuth completes with a
+│                                      │   registered redirect_uri and the
+│                                      │   token-exchange POST goes through
+│                                      │   us instead of DNS-blocked claude.ai.
+└──────────────────────────────────────┘
+                                               │
+                                               ▼
+                                    api.anthropic.com / claude.ai / pivot.claude.ai
+                                    (billed against your Claude subscription)
 ```
 
-## Who this is for
+### Why three Workers, not one
 
-Yourself. One Claude account, one Cloudflare account, one laptop. Don't publish your Worker URLs — a leaked refresh token lets anyone impersonate you against Anthropic. See [DISCLAIMER.md](./DISCLAIMER.md).
+Each Worker has a different role and **different requirements**:
 
-## Quick setup
+| Worker | Auth injection | Purpose |
+|---|---|---|
+| `<name>.workers.dev` (main) | **OFF — pass-through** | Office add-ins' API calls route here. They already have their own valid OAuth token (from sign-in); injecting Claude-Code's token on top would break them (token is tied to a different `client_id`). |
+| `<name>-test.workers.dev` | **ON — auth injection** | VSCode Claude Code points here. Needed because Claude Code's local OAuth refresh endpoint is DNS-blocked; this Worker refreshes on its behalf. |
+| `<name>-pivot.workers.dev` | n/a (not an API proxy) | Proxies Anthropic's add-in UI with bundle rewrites. Only needed if you use the Office add-ins. |
 
-See [SETUP.md](./SETUP.md) for the full walkthrough. Summary:
+**Do not collapse these.** If you turn auth-injection on the main Worker, the Office add-ins break. If you turn it off the test Worker, VSCode stops getting refreshed tokens. The splits are deliberate.
 
-```powershell
-# One-time
-git clone https://github.com/<you>/claude-oauth-worker.git ~\claude-oauth-worker
-cd ~\claude-oauth-worker
-npm install -g wrangler
-wrangler login
+---
 
-# Create KV, edit wrangler.toml with the returned id + change 'name' values
-wrangler kv namespace create CLAUDE_TOKEN_CACHE
+## Setup
 
-# Deploy the three Workers
-wrangler deploy                    # main
-wrangler deploy --env test         # optional soak env
-wrangler deploy --env pivot        # only needed for Office add-ins
+Pick your path. Full walkthrough: [SETUP.md](./SETUP.md).
 
-# Fix VSCode Claude Code — see SETUP.md for the refresh-token bootstrap
+**Just VSCode Claude Code** (about 10 min):  → [SETUP.md Part A](./SETUP.md#part-a--vscode-claude-code-auth-fix)
 
-# Install Office add-ins (Excel/PowerPoint/Word)
-.\scripts\install-office-addins.ps1 -PivotWorkerUrl "https://<your-pivot>.workers.dev"
-```
+**Just Office add-ins** (about 15 min):  → [SETUP.md Part B](./SETUP.md#part-b--office-add-ins-excel--powerpoint--word)
 
-## Features
+**Both** (about 20 min): do Part A, then Part B. Part B reuses some of Part A's setup.
 
-### VSCode Claude Code auth fix
+---
 
-- The main Worker accepts normal Anthropic API requests.
-- When `ENABLE_AUTH_INJECTION=true`, it refreshes OAuth tokens server-side using a long-lived refresh token stored as a Worker secret, caches the resulting access token in Cloudflare KV, and rewrites `Authorization: Bearer` headers on outbound requests.
-- Combined with "Shape B" (a one-field edit in your local `~/.claude/.credentials.json` setting `expiresAt` to the year 2286), Claude Code never attempts its own refresh, never runs into the DNS block, never logs you out.
+## What you get, once set up
 
-See [SETUP.md](./SETUP.md) for the bootstrap.
+**VSCode Claude Code on the blocked machine:**
+- Works exactly like on an unblocked network
+- Silent token refresh every few hours via your Worker
+- You never see a "logged out" state again
 
-### Office add-ins (Claude for Excel, PowerPoint, Word)
+**Office add-ins on the blocked machine:**
+- Click **Insert → Get Add-ins → My Add-ins → Developer Add-ins → Claude (proxied, Excel)** → Add
+- Task pane opens with Anthropic's real Claude UI
+- Sign in once per device via phone (paste a URL, authorize, done)
+- Tokens persist across Office restarts, machine reboots
 
-> **Plan-tier gotcha:** Anthropic gates **Claude for Word** to Team/Enterprise plans only. Max/Pro plans can install Excel and PowerPoint but Word will show "Claude for Word is available on Team and Enterprise plans" after sign-in. Not a bug — that's the intended entitlement check. Excel and PowerPoint work on Max/Pro.
-
-
-The pivot-proxy Worker proxies Anthropic's add-in backend at `pivot.claude.ai`. It rewrites the add-in's minified JS bundle in flight to:
-
-- Force a registered `redirect_uri` so OAuth authorize doesn't 400.
-- Route the OAuth token exchange through this Worker (so the DNS-blocked laptop can mint tokens).
-- Route the add-in's inference calls through your main Worker (so chat with Claude from inside Excel actually reaches Anthropic).
-
-See [PIVOT-PROXY.md](./PIVOT-PROXY.md) for the full spec, troubleshooting, and recovery steps when Anthropic ships a breaking bundle change.
+---
 
 ## Included scripts
 
-| Script | Purpose |
+All scripts are in `scripts/`. Run from the repo root (`cd ~/claude-oauth-worker`).
+
+| Script | When to run it |
 |---|---|
-| `scripts/install-office-addins.ps1 -PivotWorkerUrl <url>` | Generate Excel/PowerPoint/Word manifests from templates, substituting your Worker URL, and register them in HKCU so Office picks them up. No admin needed. |
-| `scripts/uninstall-office-addins.ps1` | Remove the Office add-in registry entries. |
-| `scripts/re-seed-worker-tokens.ps1` | When Anthropic rotates your refresh token or revokes it, paste a fresh one and re-seed both the secret and KV. |
-| `scripts/shape-b-apply.ps1` | Idempotently set `expiresAt` far-future in `~/.claude/.credentials.json` so Claude Code doesn't try to refresh locally. |
-| `scripts/panic-rollback.ps1` | Revert `ANTHROPIC_BASE_URL` and restore credentials from the pre-Shape-B backup. |
-| `scripts/diagnose-pivot-rewrite.sh <pivot-url>` | Fetch the current add-in bundle and check every critical rewrite with PASS/FAIL. Run first when the Office add-in breaks. |
+| `install-office-addins.ps1 -PivotWorkerUrl <url>` | Once, after deploying your pivot Worker, to sideload Office manifests. Also after Anthropic bundle updates, to bump manifest version and force WebView2 reload. |
+| `uninstall-office-addins.ps1` | To remove the Office sideloads from HKCU. |
+| `re-seed-worker-tokens.ps1` | When the main Worker starts returning `oauth_refresh_error` (Anthropic revoked your stored refresh token). Requires fetching a fresh refresh token from your personal device first. |
+| `shape-b-apply.ps1` | Once, during VSCode setup, to set `expiresAt` far-future in your local credentials so Claude Code doesn't attempt its own (DNS-blocked) refresh. |
+| `panic-rollback.ps1` | When everything's on fire — reverts VSCode to pre-fix state so you can fall back to manual credential pasting. |
+| `diagnose-pivot-rewrite.sh <pivot-url>` | When the Office add-in breaks after an Anthropic bundle update. First `[FAIL]` tells you what regex to update in `src/pivot-proxy.js`. |
 
-## Failure handling
+---
 
-**Most-likely failure:** the refresh token stored in the main Worker dies (Anthropic rotated, you signed out, etc.) → Worker returns `oauth_refresh_error`. Recovery is a fresh Claude Code login on an unblocked network, re-seed Worker. See SETUP.md → "Failure handling".
+## When it breaks
 
-**Second most likely:** Anthropic ships a new add-in bundle whose minified form doesn't match a regex in `pivot-proxy.js`. Run `bash scripts/diagnose-pivot-rewrite.sh <pivot-url>`. The first `[FAIL]` tells you what to fix.
+**VSCode stops working suddenly:**
+- Most likely cause: Anthropic rotated / revoked your stored refresh token.
+- Fix: [SETUP.md → "Recovery"](./SETUP.md#recovery-when-things-break)
 
-See [PIVOT-PROXY.md](./PIVOT-PROXY.md) for the troubleshooting matrix.
+**Office add-in stops working after an Anthropic update:**
+- Most likely cause: Anthropic shipped a new bundle whose minified shape doesn't match one of our regex rewrites.
+- Fix: [PIVOT-PROXY.md → troubleshooting](./PIVOT-PROXY.md)
 
-## Disclaimer
+**Everything's on fire:**
+- Run `scripts/panic-rollback.ps1`. You're back to pre-setup state in 90 seconds.
 
-See [DISCLAIMER.md](./DISCLAIMER.md). Not affiliated with or endorsed by Anthropic. Using the pivot-proxy to access Anthropic's official add-in is a workaround for broken network conditions; it uses your own Claude account's real OAuth tokens and the same public OAuth flow the add-in uses normally.
+---
+
+## Known fragility
+
+- **Pattern-based JS-bundle rewrites** (for the Office add-ins) depend on Anthropic's minified code staying structurally similar. Anthropic deploys frequently. A given regex set has a useful life of weeks to months. When it breaks, the diagnostic script tells you what to fix.
+- **OAuth refresh tokens die** periodically (Anthropic security policy). You'll re-seed once every few weeks to months using the re-seed script.
+- **Cloudflare Workers outage** = everything down. Historically ~99.99% uptime; not a real concern.
+- **Anthropic's ToS** applies. This setup uses your own Claude account with your own OAuth tokens — same auth flow Anthropic's clients use. No scope escalation, no billing trickery. See [DISCLAIMER.md](./DISCLAIMER.md).
+
+---
+
+## FAQ
+
+**Does this cost anything?**
+No. Cloudflare Workers free tier is 100,000 requests/day. Your Claude usage still counts against your existing subscription quota — exactly the same as if you used Claude directly.
+
+**Is this against Anthropic's terms?**
+This uses Anthropic's own public OAuth flow with your own tokens. No scope escalation, no sharing across users, no bypassing billing. It's functionally identical to Anthropic's intended flow — just with an extra hop that you control. That said, this is unofficial and unsupported by Anthropic; read [DISCLAIMER.md](./DISCLAIMER.md) and use good judgment.
+
+**Will my employer's DLP see my Claude prompts?**
+Your traffic goes to Cloudflare's network (which their filter doesn't block) and then to Anthropic. SNI-level inspection might see that you're talking to Cloudflare Workers, but not what's in the traffic (it's TLS). If your prompts include sensitive work data, weigh the privacy implications of running it through Cloudflare infra vs. Anthropic direct.
+
+**Does this work on Mac? Linux?**
+The Workers run on Cloudflare — platform-agnostic. The PowerShell scripts are Windows-specific. On Mac/Linux, the equivalent commands are trivial (bash `sed`, `nix-env install wrangler`, etc.) but not pre-written. Contributions welcome.
+
+**My refresh token rotates. How often will I need to re-seed?**
+Empirically every few weeks to months, depending on how often Anthropic's policy triggers a revocation. You'll know because the Worker starts returning `oauth_refresh_error` — at which point you run the re-seed script with a fresh token from your personal device. ~90 seconds.
+
+**Can I run multiple Claude accounts?**
+One account per Worker. You can deploy multiple copies of this repo under different Worker names to handle multiple accounts.
+
+**Why don't you just ask IT to allowlist Anthropic?**
+You should. This repo exists for situations where IT either can't or won't. If your IT team will approve the allowlist, that's a better long-term solution than any of this.
+
+---
 
 ## License
 
 MIT — see [LICENSE](./LICENSE).
+
+## Disclaimer
+
+See [DISCLAIMER.md](./DISCLAIMER.md). Not affiliated with or endorsed by Anthropic or Microsoft.
