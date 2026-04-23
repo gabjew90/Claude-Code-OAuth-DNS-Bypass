@@ -1,0 +1,36 @@
+# Claude OAuth Worker — template config
+#
+# Before `wrangler deploy` for the first time:
+#   1. Change `name` to something unique under your Cloudflare account
+#      (this becomes `<name>.<your-subdomain>.workers.dev`).
+#   2. Create a KV namespace and paste its id below:
+#        wrangler kv namespace create CLAUDE_TOKEN_CACHE
+#   3. Seed the refresh-token secret (see README / SETUP):
+#        wrangler secret put CLAUDE_REFRESH_TOKEN
+
+name = "claude-oauth-worker"
+main = "src/index.js"
+compatibility_date = "2026-04-22"
+
+# Main env. Defaults to auth-injection OFF so the first deploy is
+# behavior-neutral (pure pass-through). Flip to "true" only after you've
+# tested and are ready to cut over.
+[vars]
+ENABLE_AUTH_INJECTION = "false"
+
+# Paste the id returned by `wrangler kv namespace create CLAUDE_TOKEN_CACHE`
+[[kv_namespaces]]
+binding = "CLAUDE_TOKEN_CACHE"
+id = "REPLACE_ME_WITH_KV_NAMESPACE_ID"
+
+# Optional: a second env for safe experimentation. Its Worker URL will be
+# `<name>-test.<your-subdomain>.workers.dev`. Deploy with `wrangler deploy --env test`.
+[env.test]
+name = "claude-oauth-worker-test"
+
+[env.test.vars]
+ENABLE_AUTH_INJECTION = "true"
+
+[[env.test.kv_namespaces]]
+binding = "CLAUDE_TOKEN_CACHE"
+id = "REPLACE_ME_WITH_KV_NAMESPACE_ID"
