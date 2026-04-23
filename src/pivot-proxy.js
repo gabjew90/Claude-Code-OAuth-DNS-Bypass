@@ -30,7 +30,7 @@ const INJECT_HTML = `<!doctype html>
   #out{background:#eef;padding:8px;border-radius:3px;margin-top:8px;}
   .row{display:flex;gap:12px;align-items:center;flex-wrap:wrap;}
 </style></head><body>
-<h2>Inject auth into ccvs-pivot (this origin)</h2>
+<h2>Inject auth into this Worker origin</h2>
 <p class="hint">Use this to transplant localStorage + sessionStorage captured
 from a successful Claude-add-in sign-in elsewhere (phone, personal laptop).
 The proxied add-in at this origin will then behave as if signed in.</p>
@@ -49,7 +49,7 @@ Office.js), sign in. Then in that device's DevTools console, run:</p>
 <textarea id="payload" placeholder='{"localStorage":{...},"sessionStorage":{...},"cookie":"..."}'></textarea>
 <div class="row">
   <button onclick="inject()">Inject &rarr; open add-in</button>
-  <button onclick="dump()">Dump current (ccvs-pivot) storage for comparison</button>
+  <button onclick="dump()">Dump current current storage for comparison</button>
   <button onclick="clearAll()" style="color:#b00;">Clear all storage on this origin</button>
 </div>
 <pre id="out"></pre>
