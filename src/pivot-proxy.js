@@ -49,7 +49,7 @@ Office.js), sign in. Then in that device's DevTools console, run:</p>
 <textarea id="payload" placeholder='{"localStorage":{...},"sessionStorage":{...},"cookie":"..."}'></textarea>
 <div class="row">
   <button onclick="inject()">Inject &rarr; open add-in</button>
-  <button onclick="dump()">Dump current current storage for comparison</button>
+  <button onclick="dump()">Dump current storage for comparison</button>
   <button onclick="clearAll()" style="color:#b00;">Clear all storage on this origin</button>
 </div>
 <pre id="out"></pre>
