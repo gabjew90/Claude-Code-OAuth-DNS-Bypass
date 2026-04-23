@@ -113,10 +113,13 @@ Edit `~/.claude/settings.json` (Windows: `%USERPROFILE%\.claude\settings.json`).
 {
   "env": {
     "ANTHROPIC_BASE_URL": "https://<your-worker>.workers.dev",
-    "NODE_TLS_REJECT_UNAUTHORIZED": "0"
+    "NODE_TLS_REJECT_UNAUTHORIZED": "0",
+    "DISABLE_TELEMETRY": "1"
   }
 }
 ```
+
+Why `DISABLE_TELEMETRY=1`: Claude Code's telemetry subsystem POSTs event batches to an Anthropic endpoint that doesn't accept the OAuth scopes our Worker uses. Without this flag you'll see `403 Forbidden` errors in the VSCode output panel — harmless (doesn't affect chat) but noisy. Setting the flag stops the telemetry attempts and silences the errors. (Alternative broader flag: `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`, which also quiets update checks and feature-flag polling.)
 
 Save.
 
