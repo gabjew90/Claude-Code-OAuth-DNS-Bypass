@@ -1,30 +1,38 @@
-# Claude OAuth Worker — template config
+# claude-oauth-worker — template config
 #
-# Before `wrangler deploy` for the first time:
-#   1. Change `name` to something unique under your Cloudflare account
-#      (this becomes `<name>.<your-subdomain>.workers.dev`).
-#   2. Create a KV namespace and paste its id below:
-#        wrangler kv namespace create CLAUDE_TOKEN_CACHE
-#   3. Seed the refresh-token secret (see README / SETUP):
-#        wrangler secret put CLAUDE_REFRESH_TOKEN
+# Three deploy targets defined:
+#   1. default      - main Anthropic-API proxy (VSCode Claude Code uses this)
+#   2. env.test     - same as main, but with auth-injection ON for safe soaking
+#   3. env.pivot    - dedicated proxy for the official Anthropic Office add-in
+#                     (hosted at pivot.claude.ai) — lets you install and use
+#                     Anthropic's real Claude for Excel/PowerPoint/Word add-ins
+#                     on a DNS-blocked network.
+#
+# Setup (first time):
+#   npm install -g wrangler
+#   wrangler login
+#   wrangler kv namespace create CLAUDE_TOKEN_CACHE
+#   # Paste the returned id into every `kv_namespaces.id` field below.
+#   # Change `name` fields to something unique under your Cloudflare account.
+#   wrangler deploy                  # main
+#   wrangler deploy --env test       # optional test Worker
+#   wrangler deploy --env pivot      # only needed if you want Office add-ins
+#   wrangler secret put CLAUDE_REFRESH_TOKEN             # for VSCode auth fix
+#   wrangler secret put CLAUDE_REFRESH_TOKEN --env test  # same
 
+# ---- default env (main api.anthropic.com proxy) ----
 name = "claude-oauth-worker"
 main = "src/index.js"
 compatibility_date = "2026-04-22"
 
-# Main env. Defaults to auth-injection OFF so the first deploy is
-# behavior-neutral (pure pass-through). Flip to "true" only after you've
-# tested and are ready to cut over.
 [vars]
 ENABLE_AUTH_INJECTION = "false"
 
-# Paste the id returned by `wrangler kv namespace create CLAUDE_TOKEN_CACHE`
 [[kv_namespaces]]
 binding = "CLAUDE_TOKEN_CACHE"
 id = "REPLACE_ME_WITH_KV_NAMESPACE_ID"
 
-# Optional: a second env for safe experimentation. Its Worker URL will be
-# `<name>-test.<your-subdomain>.workers.dev`. Deploy with `wrangler deploy --env test`.
+# ---- test env ----
 [env.test]
 name = "claude-oauth-worker-test"
 
@@ -34,3 +42,14 @@ ENABLE_AUTH_INJECTION = "true"
 [[env.test.kv_namespaces]]
 binding = "CLAUDE_TOKEN_CACHE"
 id = "REPLACE_ME_WITH_KV_NAMESPACE_ID"
+
+# ---- pivot env (proxies pivot.claude.ai for the official Office add-ins) ----
+# Deploy name must be distinct since this runs src/pivot-proxy.js, not src/index.js.
+[env.pivot]
+name = "claude-oauth-worker-pivot"
+main = "src/pivot-proxy.js"
+
+[env.pivot.vars]
+# Where the add-in's api.anthropic.com calls are rewritten to.
+# Set this to the URL of your main deployment (above).
+MAIN_WORKER_URL = "https://claude-oauth-worker.<your-subdomain>.workers.dev"

@@ -1,16 +1,22 @@
 # Setup guide
 
-End-to-end walkthrough: from cloning this repo to Claude Code working on a DNS-blocked network. Expect ~10–15 minutes.
+Two independent capabilities, pick either or both:
 
-## Prerequisites
+- **A. VSCode Claude Code auth fix** — stop having to re-paste credentials from a personal laptop. Expect ~15 min.
+- **B. Office add-ins (Excel / PowerPoint / Word)** — install and authenticate Anthropic's real Claude add-ins on the blocked network. Expect another ~15 min after A.
 
-- **Claude Max subscription** on an Anthropic account you control. (Pro might work — untested. API-only accounts won't; this uses OAuth, not API keys.)
-- **Cloudflare account** (free tier is plenty — Workers free tier is 100,000 requests/day).
-- **Node.js** (for `wrangler`, `npm`). Windows user-profile install is fine; no admin needed.
-- **Access to a second device or network** where `claude.ai` and `platform.claude.com` are reachable, so you can do an OAuth login and extract a fresh refresh token. (Typically your personal laptop on home WiFi.)
-- **VSCode** (or any Claude Code client) on the blocked-network laptop.
+## Prerequisites (both)
 
-## Step 1 — Clone + install Wrangler
+- **Claude Max subscription** on your Anthropic account (Pro might work, untested).
+- **Cloudflare account** (free tier is fine — 100K Worker requests/day).
+- **Node.js** (for `wrangler`). Windows per-user install works, no admin needed.
+- **A second device or network** where `claude.ai` / `pivot.claude.ai` are reachable — phone on cellular, personal laptop on home wifi, etc.
+
+---
+
+## A. VSCode Claude Code auth fix
+
+### Step 1 — Clone + install Wrangler
 
 ```powershell
 git clone https://github.com/<you>/claude-oauth-worker.git ~\claude-oauth-worker
@@ -19,59 +25,39 @@ npm install -g wrangler
 wrangler login
 ```
 
-`wrangler login` opens a browser for Cloudflare OAuth. Sign in to your Cloudflare account. One time.
+### Step 2 — Configure `wrangler.toml`
 
-## Step 2 — Configure `wrangler.toml`
+Open `wrangler.toml`. Three `name =` lines near the top — pick something unique under your Cloudflare account (e.g. `myname-claude-worker`) and apply consistently:
+- default: `<name>` → e.g. `myname-claude-worker`
+- `[env.test]` → `<name>-test` → `myname-claude-worker-test`
+- `[env.pivot]` → `<name>-pivot` → `myname-claude-worker-pivot`
 
-Open `wrangler.toml` and change one field:
-
-```toml
-name = "claude-oauth-worker"   ← change this to anything unique under YOUR Cloudflare account
-```
-
-This becomes your Worker's URL: `https://<name>.<your-subdomain>.workers.dev`. You'll need that URL a couple steps from now.
-
-## Step 3 — Create the KV namespace
+### Step 3 — Create the KV namespace
 
 ```powershell
 wrangler kv namespace create CLAUDE_TOKEN_CACHE
 ```
 
-Output looks like:
+Copy the `id` from the output. Paste it into **both** `[[kv_namespaces]]` blocks in `wrangler.toml` where it says `REPLACE_ME_WITH_KV_NAMESPACE_ID`.
 
-```
-✨ Success!
-[[kv_namespaces]]
-binding = "CLAUDE_TOKEN_CACHE"
-id = "abcdef0123456789abcdef0123456789"
-```
-
-Copy that `id` and paste it into **both** places in `wrangler.toml` (main env and `env.test`) where it says `REPLACE_ME_WITH_KV_NAMESPACE_ID`.
-
-## Step 4 — First deploy (behavior-neutral)
+### Step 4 — First deploy (behavior-neutral)
 
 ```powershell
 wrangler deploy
 ```
 
-This uploads the Worker with `ENABLE_AUTH_INJECTION = "false"` — which means pure pass-through, no auth injection yet. Confirm it's alive:
+Confirm it's reachable: `curl https://<your-main>.workers.dev/v1/messages` should return an Anthropic auth error (expected — you didn't send a token). That's enough to prove the proxy works.
 
-```powershell
-curl https://<your-worker-name>.<subdomain>.workers.dev/v1/messages
-```
+### Step 5 — Get a fresh refresh token
 
-You'll get an auth error from Anthropic (expected — no token attached), but the fact that you got an Anthropic response at all means the proxy is working.
+On a network where `claude.ai` resolves (personal laptop, phone hotspot):
 
-## Step 5 — Get a fresh refresh token
-
-Do this on a **network where `claude.ai` is reachable**, e.g. your personal laptop.
-
-1. Sign out of Claude Code (or any Claude client).
-2. Sign back in. This issues you a fresh OAuth pair.
+1. Sign out of Claude Code.
+2. Sign back in. This issues a fresh pair.
 3. Open `~/.claude/.credentials.json` (Windows: `%USERPROFILE%\.claude\.credentials.json`).
-4. Copy the value of the `refreshToken` field. It's a ~108-character string starting with `sk-ant-oat01-`.
+4. Copy the `refreshToken` value (~108-character string starting with `sk-ant-oat01-`).
 
-## Step 6 — Seed the Worker with the refresh token
+### Step 6 — Seed the Worker
 
 Back on the blocked-network laptop:
 
@@ -79,9 +65,9 @@ Back on the blocked-network laptop:
 wrangler secret put CLAUDE_REFRESH_TOKEN
 ```
 
-Paste the refresh token when prompted. Press Enter. (Optional: repeat with `--env test` if you want to test there first.)
+Paste the refresh token when prompted.
 
-## Step 7 — Flip the auth-injection flag on
+### Step 7 — Activate auth injection
 
 Edit `wrangler.toml`:
 
@@ -90,56 +76,97 @@ Edit `wrangler.toml`:
 ENABLE_AUTH_INJECTION = "true"
 ```
 
-Then `wrangler deploy` again. The Worker will now mint fresh access tokens on every incoming request.
+Redeploy: `wrangler deploy`.
 
-Verify:
+Smoke test:
 
 ```powershell
-curl -X POST https://<your-worker>.workers.dev/v1/messages `
+curl.exe -X POST https://<your-main>.workers.dev/v1/messages `
   -H "content-type: application/json" `
   -H "anthropic-beta: oauth-2025-04-20" `
   -H "anthropic-version: 2023-06-01" `
-  -H "authorization: Bearer any_bogus_value_will_do" `
-  -d '{\"model\":\"claude-haiku-4-5\",\"max_tokens\":20,\"messages\":[{\"role\":\"user\",\"content\":\"reply: SETUP_OK\"}]}'
+  -H "authorization: Bearer any_value_worker_replaces_it" `
+  -d '{\"model\":\"claude-haiku-4-5\",\"max_tokens\":20,\"messages\":[{\"role\":\"user\",\"content\":\"reply: OK\"}]}'
 ```
 
-You should get a real Claude response. The fact that a bogus `authorization` header worked is the proof — the Worker stripped it and injected a real one.
+Should return a real Claude response. If yes, the Worker is minting tokens correctly.
 
-## Step 8 — Point Claude Code at the Worker
+### Step 8 — Point Claude Code at the Worker
 
-Edit `~/.claude/settings.json` (Windows: `%USERPROFILE%\.claude\settings.json`). Under the `env` block, add (or set):
+Edit `~/.claude/settings.json`:
 
 ```json
 {
   "env": {
-    "ANTHROPIC_BASE_URL": "https://<your-worker>.workers.dev",
+    "ANTHROPIC_BASE_URL": "https://<your-main>.workers.dev",
     "NODE_TLS_REJECT_UNAUTHORIZED": "0",
     "DISABLE_TELEMETRY": "1"
   }
 }
 ```
 
-Why `DISABLE_TELEMETRY=1`: Claude Code's telemetry subsystem POSTs event batches to an Anthropic endpoint that doesn't accept the OAuth scopes our Worker uses. Without this flag you'll see `403 Forbidden` errors in the VSCode output panel — harmless (doesn't affect chat) but noisy. Setting the flag stops the telemetry attempts and silences the errors. (Alternative broader flag: `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`, which also quiets update checks and feature-flag polling.)
-
-Save.
-
-## Step 9 — Apply Shape B
-
-Still on the blocked-network laptop. This lies to Claude Code about token expiry so it stops attempting local refresh (which would hit the DNS block).
-
-Easiest: run the included script.
+### Step 9 — Apply Shape B
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File ~\claude-oauth-worker\scripts\shape-b-apply.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\shape-b-apply.ps1
 ```
 
-Or manually: open `~/.claude/.credentials.json`, change the `expiresAt` field value from its current number to `9999999999000` (year 2286). Save.
+This sets `claudeAiOauth.expiresAt` to year 2286 so Claude Code stops attempting local refresh (which would hit the DNS block). Makes a backup first.
 
-## Step 10 — Reload VSCode
+### Step 10 — Reload VSCode
 
-`Ctrl+Shift+P` → "Developer: Reload Window".
+`Ctrl+Shift+P` → "Developer: Reload Window". Ask Claude anything. If it responds, you're done.
 
-Ask Claude anything. If it responds, you're done. You should not need to touch `.credentials.json` again for weeks or months.
+---
+
+## B. Office add-ins (Excel / PowerPoint / Word)
+
+Only needed if you want to use Anthropic's official Claude add-ins in Office on the blocked network.
+
+### Step B1 — Update wrangler.toml for the pivot Worker
+
+In `wrangler.toml` under `[env.pivot.vars]`, set `MAIN_WORKER_URL` to the URL of your main Worker from Part A:
+
+```toml
+[env.pivot.vars]
+MAIN_WORKER_URL = "https://<your-main>.workers.dev"
+```
+
+### Step B2 — Deploy the pivot Worker
+
+```powershell
+wrangler deploy --env pivot
+```
+
+Your pivot Worker URL is now `https://<your-name>-pivot.<your-subdomain>.workers.dev`.
+
+### Step B3 — Install the Office sideloads
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\install-office-addins.ps1 `
+  -PivotWorkerUrl "https://<your-name>-pivot.<your-subdomain>.workers.dev"
+```
+
+This:
+- Generates Excel / PowerPoint / Word manifests with your pivot Worker URL baked in
+- Writes them to `~\ClaudeAddin\`
+- Registers them in `HKCU\Software\Microsoft\Office\16.0\Wef\Developer` (no admin needed)
+
+### Step B4 — Load the add-ins in Office
+
+Fully quit Excel / PowerPoint / Word (Task Manager if needed). Optionally clear WebView2 cache:
+
+```powershell
+Remove-Item -Recurse -Force "$env:LOCALAPPDATA\Microsoft\Office\16.0\Wef\webview2" -ErrorAction SilentlyContinue
+```
+
+Reopen the Office app → **Insert → Get Add-ins → My Add-ins → Developer Add-ins tab** → `Claude (proxied, <App>)` → **Add**.
+
+### Step B5 — Sign in (one-time per device)
+
+First time the task pane opens, click **Sign in**. It'll give you a URL. Copy it → paste in your phone's browser (where `claude.ai` resolves normally). Authorize. The add-in completes the flow via the pivot Worker and stores your tokens locally.
+
+Done. Tokens persist across Office restarts.
 
 ---
 
@@ -147,32 +174,33 @@ Ask Claude anything. If it responds, you're done. You should not need to touch `
 
 ### Worker returns `{"error":{"type":"oauth_refresh_error",...}}`
 
-Means the Worker's stored refresh token is dead (revoked, rotated stuck, or hit an edge case). Fix:
+Means the main Worker's stored refresh token died. Recovery:
 
-1. On personal laptop: sign out of Claude Code + sign back in → fresh `refreshToken`.
-2. On blocked laptop: run `scripts/re-seed-worker-tokens.ps1`, paste the fresh token. Script handles the rest (seeds both envs, flushes KV).
-3. Reload VSCode.
+1. On personal laptop: sign out of Claude Code, sign back in.
+2. Copy the new `refreshToken` from `~/.claude/.credentials.json`.
+3. Run `powershell -ExecutionPolicy Bypass -File .\scripts\re-seed-worker-tokens.ps1` — paste the new token when prompted.
+4. Reload VSCode.
 
-### VSCode Claude shows "logged out"
+### Office add-in stops working after an Anthropic bundle update
 
-Means Shape B was reverted somehow, or Claude Code's extension update is doing new auth validation. Fix:
+Anthropic ships new bundles frequently (the minified variable names change). Run:
 
-1. Check `~/.claude/.credentials.json` — `claudeAiOauth.expiresAt` should be `9999999999000`. If not, re-run `scripts/shape-b-apply.ps1`.
-2. If still logged out after Shape B is confirmed, run `scripts/panic-rollback.ps1` to revert everything, then paste fresh credentials from personal laptop (the pre-Worker workflow).
+```bash
+bash scripts/diagnose-pivot-rewrite.sh https://<your-pivot>.workers.dev
+```
 
-### Everything is broken, total panic
+First `[FAIL]` tells you which rewrite needs updating in `src/pivot-proxy.js`. See [PIVOT-PROXY.md](./PIVOT-PROXY.md) for detailed troubleshooting.
 
-Run `scripts/panic-rollback.ps1`. This:
-1. Restores `~/.claude/settings.json` to its pre-Worker state (removes `ANTHROPIC_BASE_URL`).
-2. Restores `~/.claude/.credentials.json` to its pre-Shape-B state if a backup exists.
-3. You're back to pre-Worker life — manually paste `.credentials.json` from personal laptop whenever it expires. Investigate the Worker issue at your leisure.
+### Something is on fire, get me back to yesterday
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\panic-rollback.ps1
+```
+
+Reverts `ANTHROPIC_BASE_URL` to unset, restores credentials from the pre-Shape-B backup, puts you back in the pre-fix state (manual paste ritual works). Run any of the setup steps above to rebuild.
 
 ---
 
 ## Optional: test environment
 
-`wrangler.toml` defines a second env `env.test` that deploys to `<name>-test.workers.dev` with `ENABLE_AUTH_INJECTION = "true"` by default. Useful for validating changes without touching the main Worker. Deploy with `wrangler deploy --env test`. Point your VSCode at `<name>-test.workers.dev` while testing.
-
-## Optional: removing the `/addin/` route
-
-If you're not planning to build a sideloaded Office add-in with this Worker, you can delete the `if (url.pathname.startsWith("/addin/"))` block from `src/index.js` and the `ADDIN_STUB_HTML` constant. Not required, just cleanup.
+`wrangler.toml` defines `[env.test]` which deploys to `<name>-test.workers.dev` with `ENABLE_AUTH_INJECTION=true` by default. Useful for testing changes without touching the main Worker. Deploy with `wrangler deploy --env test`. Point VSCode at the test URL while validating, then switch back to main.
