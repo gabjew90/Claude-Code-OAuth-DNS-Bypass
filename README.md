@@ -12,6 +12,20 @@ Typical use case: your corporate / school / restricted network filters Anthropic
 
 You keep your Claude Max quota. No API key, no extra billing — everything runs on the real OAuth tokens your normal Claude account issues.
 
+## Role separation across the three Workers — important
+
+Before you flip any flag, understand how the three Workers divide responsibilities:
+
+| Worker | Used by | `ENABLE_AUTH_INJECTION` | Why |
+|---|---|---|---|
+| **main** (`<name>.workers.dev`) | The Office add-ins route their `api.anthropic.com` calls here (auto, via pivot-proxy rewriting their bundle) | **`false` (pass-through)** | The add-ins already have their own valid OAuth tokens (from the phone-auth flow). Injecting Claude-Code-scoped tokens in their place would break the add-ins' profile / entitlement calls because tokens are tied to different client_ids. |
+| **test** (`<name>-test.workers.dev`) | Point your VSCode `ANTHROPIC_BASE_URL` here | **`true` (inject)** | VSCode Claude Code benefits from server-side OAuth refresh because its local refresh endpoint is DNS-blocked. |
+| **pivot** (`<name>-pivot.workers.dev`) | The Office add-ins load from here (sideloaded manifest) | n/a (not an API proxy) | Proxies `pivot.claude.ai` with surgical bundle rewrites. |
+
+Keep the Workers in their lanes. **Do not set the main Worker's flag to `true` if you're using the Office add-ins** — it'll break them.
+
+If you only care about the VSCode auth fix (no Office add-ins), the whole model collapses to "just point VSCode at the test Worker." You can skip deploying the pivot Worker entirely.
+
 ## Architecture at a glance
 
 ```

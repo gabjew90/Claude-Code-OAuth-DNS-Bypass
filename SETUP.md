@@ -69,14 +69,22 @@ Paste the refresh token when prompted.
 
 ### Step 7 — Activate auth injection
 
-Edit `wrangler.toml`:
+> **Important:** if you also plan to use the Office add-ins (Part B below), leave the **main** env's `ENABLE_AUTH_INJECTION` as `"false"` and only flip the **test** env's flag to `"true"`. The Office add-ins route their api.anthropic.com traffic through the main Worker in pass-through mode; turning auth-injection on there would replace their own valid tokens with Claude-Code-scoped tokens, breaking profile/entitlement checks. See README for the full role-separation table.
+>
+> If you are **not** using the Office add-ins, it's fine to enable auth-injection on the main Worker too.
+
+Edit `wrangler.toml` under `[env.test.vars]` (or `[vars]` if Office add-ins aren't in scope):
 
 ```toml
-[vars]
+[env.test.vars]
 ENABLE_AUTH_INJECTION = "true"
 ```
 
-Redeploy: `wrangler deploy`.
+Redeploy whichever env you changed:
+
+```powershell
+wrangler deploy --env test
+```
 
 Smoke test:
 
@@ -93,12 +101,12 @@ Should return a real Claude response. If yes, the Worker is minting tokens corre
 
 ### Step 8 — Point Claude Code at the Worker
 
-Edit `~/.claude/settings.json`:
+Edit `~/.claude/settings.json` — point at whichever env you enabled auth-injection on (usually the test env if you want Office add-ins to coexist):
 
 ```json
 {
   "env": {
-    "ANTHROPIC_BASE_URL": "https://<your-main>.workers.dev",
+    "ANTHROPIC_BASE_URL": "https://<your-name>-test.workers.dev",
     "NODE_TLS_REJECT_UNAUTHORIZED": "0",
     "DISABLE_TELEMETRY": "1"
   }

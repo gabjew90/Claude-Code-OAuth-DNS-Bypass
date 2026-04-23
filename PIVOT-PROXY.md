@@ -240,7 +240,7 @@ Get-ChildItem "$env:LOCALAPPDATA\Microsoft\Office\16.0\Wef" -Directory |
 - **Anthropic's ToS.** Routing the official add-in through a user-controlled proxy may be frowned upon even though tokens are yours and usage counts against your Max sub. Ask permission before sharing this pattern publicly.
 - **Not supported by Anthropic.** You can't file bug reports for this setup. When it breaks, you fix it.
 
-If any of these bite too hard, fall back to the DIY add-in (`ClaudeExcel` in the registry), which is slower to evolve but entirely under your control.
+If any of these bite too hard, you can build your own sideloaded add-in using the `/addin/` stub route in `src/index.js` as a starting point — slower to evolve but entirely under your control (not subject to Anthropic bundle changes).
 
 ---
 
