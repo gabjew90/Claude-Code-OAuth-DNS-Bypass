@@ -213,19 +213,21 @@ export default {
         `tokenEndpoint:"${workerOrigin}/v1/oauth/token"`
       );
 
-      // Rewrite A1() (returns "https://api.anthropic.com") to return the
-      // main Anthropic-API proxy Worker instead. The add-in's inference
-      // calls to /v1/messages then route through there (which proxies to
-      // the real api.anthropic.com from Cloudflare's network, not from
-      // the DNS-blocked client). Skipped if MAIN_WORKER_URL isn't set
-      // (add-in will then try to hit api.anthropic.com directly and fail
-      // in a DNS-blocked environment).
+      // Blanket-replace every "https://api.anthropic.com" reference in the
+      // bundle with the main Worker URL. This catches:
+      //   (a) the A1() function return value,
+      //   (b) hardcoded string literals like "https://api.anthropic.com/api/oauth/profile"
+      //       (used by Word for plan/entitlement verification — Excel/PPT
+      //       tolerate its failure, Word doesn't),
+      //   (c) template-literal prefixes like `${A1()}/api/...`.
+      // All forwarded to the main Worker, which proxies them through to the
+      // real api.anthropic.com from Cloudflare's network (the client's
+      // network is DNS-blocked but Cloudflare isn't). The add-in's own
+      // valid Bearer token on these requests passes through unchanged.
+      // Skipped if MAIN_WORKER_URL isn't set.
       const mainWorker = (env.MAIN_WORKER_URL || "").replace(/\/$/, "");
       if (mainWorker) {
-        body = body.replace(
-          /(function\s+[A-Za-z_$][A-Za-z0-9_$]*\s*\(\)\s*\{\s*return)\s*"https:\/\/api\.anthropic\.com"(\s*\})/g,
-          `$1"${mainWorker}"$2`
-        );
+        body = body.replaceAll("https://api.anthropic.com", mainWorker);
       }
 
       // WebView2 / Office aggressively caches add-in resources by URL.
