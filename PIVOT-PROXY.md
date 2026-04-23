@@ -168,6 +168,12 @@ The refresh token chain died. Causes:
 
 Recovery: redo the phone sign-in flow. Should take ~2 minutes.
 
+### "Claude for Word is available on Team and Enterprise plans"
+
+Not a rewrite failure — it means the proxy is working correctly. Your plan-verification call succeeded and Anthropic responded that your subscription tier doesn't include Word. Max/Pro cover Excel and PowerPoint; Word needs Team/Enterprise. Upgrade or skip Word.
+
+Symptom distinguisher: if you see "We couldn't verify your plan" *instead*, that IS a proxy issue (likely a new Anthropic hardcoded URL we need to rewrite). If you see "available on Team and Enterprise plans", auth + plan-check all worked — there's nothing to fix on our end.
+
 ### "Add-in Claude failed to download a required resource" during install
 
 We shouldn't hit this anymore — we sideload rather than install from AppSource. If you're seeing it, you're trying to install from Microsoft AppSource instead of adding the sideload from Developer Add-ins. Go to Insert → **My Add-ins** → Developer Add-ins tab → "Claude (proxied)".

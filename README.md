@@ -77,6 +77,9 @@ See [SETUP.md](./SETUP.md) for the bootstrap.
 
 ### Office add-ins (Claude for Excel, PowerPoint, Word)
 
+> **Plan-tier gotcha:** Anthropic gates **Claude for Word** to Team/Enterprise plans only. Max/Pro plans can install Excel and PowerPoint but Word will show "Claude for Word is available on Team and Enterprise plans" after sign-in. Not a bug — that's the intended entitlement check. Excel and PowerPoint work on Max/Pro.
+
+
 The pivot-proxy Worker proxies Anthropic's add-in backend at `pivot.claude.ai`. It rewrites the add-in's minified JS bundle in flight to:
 
 - Force a registered `redirect_uri` so OAuth authorize doesn't 400.

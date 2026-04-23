@@ -123,6 +123,8 @@ This sets `claudeAiOauth.expiresAt` to year 2286 so Claude Code stops attempting
 
 Only needed if you want to use Anthropic's official Claude add-ins in Office on the blocked network.
 
+> **Plan-tier note:** Excel and PowerPoint work on **Max, Pro, Team, Enterprise** plans. Word is gated to **Team and Enterprise only** — on Max/Pro the Word add-in will install and authenticate but then show "Claude for Word is available on Team and Enterprise plans." The `install-office-addins.ps1` script still registers the Word sideload (harmless, it stays inert until your plan tier covers it). Skip the Word checks below if you're on Max/Pro.
+
 ### Step B1 — Update wrangler.toml for the pivot Worker
 
 In `wrangler.toml` under `[env.pivot.vars]`, set `MAIN_WORKER_URL` to the URL of your main Worker from Part A:
